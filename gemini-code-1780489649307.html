@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vòng Quay May Mắn (Đồng Bộ Firebase)</title>
+    <title>Vòng Quay May Mắn (Bảo Mật & Đồng Bộ)</title>
 
     <style>
         body {
@@ -114,8 +114,6 @@
         .admin-panel {
             margin-top: 20px;
             padding: 10px;
-            background: #e9e9e9;
-            border-radius: 50px;
             display: inline-block;
         }
         .btn-reset {
@@ -129,7 +127,7 @@
 <body>
 
 <div class="container">
-    <h1>🎯 Vòng Quay May Mắn (Realtime)</h1>
+    <h1>🎯 Vòng Quay May Mắn</h1>
 
     <input type="text" id="playerName" placeholder="Nhập tên người chơi">
     <button id="spinBtn">Quay</button>
@@ -142,11 +140,11 @@
     <div class="result" id="result"></div>
 
     <div class="admin-panel">
-        <button id="resetBtn" class="btn-reset">Cài đặt lại vòng quay (Reset từ đầu)</button>
+        <button id="resetBtn" class="btn-reset">Cài đặt lại vòng quay (Yêu cầu mật khẩu)</button>
     </div>
 
     <div class="history">
-        <h3>Lịch sử quay (Tất cả thiết bị)</h3>
+        <h3>Lịch sử quay (Mỗi người chỉ quay 1 lần)</h3>
         <table>
             <thead>
                 <tr>
@@ -161,4 +159,230 @@
 </div>
 
 <script type="module">
-    import { initializeApp } from "https://www.gstatic.
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    // Cấu hình Firebase của bạn
+    const firebaseConfig = {
+        apiKey: "AIzaSyAo83cpAToKzpl-6Zdl3xmYO4U3gCcPPNM",
+        authDomain: "vongquaymayman-1d81b.firebaseapp.com",
+        projectId: "vongquaymayman-1d81b",
+        storageBucket: "vongquaymayman-1d81b.firebasestorage.app",
+        messagingSenderId: "948367934789",
+        appId: "1:948367934789:web:7633f372813ee21b3caa2c",
+        measurementId: "G-91KE8655MB"
+    };
+
+    // Khởi tạo Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const gameRef = ref(db, 'lucky_wheel');
+
+    // Biến trạng thái cục bộ
+    let availableNumbers = [];
+    let history = [];
+    let isSpinning = false;
+    let localRotation = 0;
+
+    const wheel = document.getElementById("wheel");
+    const spinBtn = document.getElementById("spinBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    // Hàm vẽ giao diện vòng quay
+    function drawWheel(numbersList) {
+        wheel.innerHTML = "";
+
+        if (!numbersList || numbersList.length === 0) {
+            wheel.style.background = "#ccc";
+            return;
+        }
+
+        const angle = 360 / numbersList.length;
+
+        numbersList.forEach((num, index) => {
+            const segment = document.createElement("div");
+            segment.className = "segment";
+            segment.style.background = `hsl(${index * (360 / numbersList.length)}, 70%, 55%)`;
+            segment.style.transform = `rotate(${index * angle}deg) skewY(${90 - angle}deg)`;
+
+            segment.innerHTML = `
+                <span style="
+                    transform: skewY(-${90 - angle}deg) rotate(${angle / 2}deg);
+                    display: block;
+                    position: absolute;
+                    right: 25px;
+                    bottom: 25px;">
+                    ${num}
+                </span>`;
+            wheel.appendChild(segment);
+        });
+    }
+
+    // --- LẮNG NGHE DỮ LIỆU ĐỒNG BỘ REALTIME TỪ FIREBASE ---
+    onValue(gameRef, (snapshot) => {
+        const data = snapshot.val();
+        
+        // Nếu database trống, tự động thiết lập trạng thái ban đầu
+        if (!data) {
+            set(gameRef, {
+                availableNumbers: [1, 2, 3, 4, 5, 6],
+                history: [],
+                status: { isSpinning: false, targetAngle: 0, winner: "", player: "" }
+            });
+            return;
+        }
+
+        availableNumbers = data.availableNumbers || [];
+        history = data.history ? Object.values(data.history) : [];
+
+        // Cập nhật giao diện bảng lịch sử
+        updateHistoryUI(history);
+
+        // Kiểm tra lệnh hành động quay từ Firebase
+        if (data.status && data.status.isSpinning && !isSpinning) {
+            triggerPhysicalSpin(data.status.targetAngle, data.status.winner, data.status.player);
+        } else if (!isSpinning) {
+            drawWheel(availableNumbers);
+            if (availableNumbers.length === 0) {
+                document.getElementById("result").innerHTML = "🏆 Tất cả số đã được quay hết!";
+            }
+        }
+    });
+
+    // Hàm xử lý chuyển động xoay vòng quay trực quan trên màn hình
+    function triggerPhysicalSpin(targetAngle, winner, player) {
+        isSpinning = true;
+        spinBtn.disabled = true;
+        document.getElementById("result").innerHTML = `🎲 Vòng quay đang chạy...`;
+
+        const extraSpin = 360 * 5; 
+        localRotation += extraSpin + (360 - targetAngle);
+        
+        wheel.style.transition = "transform 4s ease-out";
+        wheel.style.transform = `rotate(${localRotation}deg)`;
+
+        setTimeout(() => {
+            document.getElementById("result").innerHTML = `🎉 ${player} quay trúng số <b>${winner}</b>`;
+            
+            // Xử lý góc xoay tránh lỗi giật hình đồ họa lần sau
+            wheel.style.transition = "none";
+            wheel.style.transform = `rotate(${localRotation % 360}deg)`;
+            localRotation = localRotation % 360;
+            void wheel.offsetHeight; 
+
+            // Loại bỏ số trúng và vẽ lại vòng quay mới
+            const nextNumbers = availableNumbers.filter(n => n !== winner);
+            drawWheel(nextNumbers);
+
+            if (nextNumbers.length === 0) {
+                document.getElementById("result").innerHTML += "<br><br>🏆 Tất cả số đã được quay hết!";
+            }
+
+            isSpinning = false;
+            spinBtn.disabled = false;
+        }, 4000);
+    }
+
+    // --- XỬ LÝ SỰ KIỆN KHI ẤN NÚT QUAY ---
+    function spin() {
+        if (isSpinning) return;
+
+        const nameInput = document.getElementById("playerName");
+        const name = nameInput.value.trim();
+
+        if (!name) {
+            alert("Vui lòng nhập tên người chơi!");
+            return;
+        }
+
+        if (availableNumbers.length === 0) {
+            alert("Đã hết số trên vòng quay!");
+            return;
+        }
+
+        // KIỂM TRA TRÙNG TÊN: Mỗi người chỉ được quay 1 lần duy nhất
+        const isExist = history.some(item => item.name.toLowerCase() === name.toLowerCase());
+        if (isExist) {
+            alert(`Tài khoản "${name}" đã tham gia quay trước đó rồi! Mỗi người chỉ được quay 1 lần.`);
+            nameInput.value = "";
+            return;
+        }
+
+        // Tính toán kết quả quay
+        const randomIndex = Math.floor(Math.random() * availableNumbers.length);
+        const selectedNumber = availableNumbers[randomIndex];
+        const segmentAngle = 360 / availableNumbers.length;
+        const targetAngle = randomIndex * segmentAngle + (segmentAngle / 2);
+
+        const updatedNumbers = availableNumbers.filter(n => n !== selectedNumber);
+        const newHistoryItem = { name: name, number: selectedNumber, timestamp: Date.now() };
+        
+        // Cập nhật trạng thái kích hoạt hiệu ứng xoay và mảng số mới lên Firebase
+        update(gameRef, {
+            availableNumbers: updatedNumbers,
+            status: {
+                isSpinning: true,
+                targetAngle: targetAngle,
+                winner: selectedNumber,
+                player: name
+            }
+        });
+
+        // Ghi dữ liệu lịch sử mới vào nhánh history
+        const newLogRef = ref(db, `lucky_wheel/history/${Date.now()}`);
+        set(newLogRef, newHistoryItem);
+
+        nameInput.value = "";
+        
+        // Tự động tắt cờ trạng thái quay trên database sau khi hiệu ứng kết thúc
+        setTimeout(() => {
+            update(ref(db, 'lucky_wheel/status'), { isSpinning: false });
+        }, 4100);
+    }
+
+    // Hàm cập nhật danh sách lịch sử ra bảng hiển thị công khai
+    function updateHistoryUI(historyList) {
+        const tbody = document.getElementById("historyBody");
+        tbody.innerHTML = "";
+        
+        // Đảo ngược để lượt quay mới nhất luôn nằm ở đầu bảng
+        historyList.sort((a,b) => b.timestamp - a.timestamp);
+
+        historyList.forEach((item, index) => {
+            tbody.innerHTML += `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td>${item.name}</td>
+                    <td><b>${item.number}</b></td>
+                </tr>
+            `;
+        });
+    }
+
+    // --- HÀM RESET BẢO MẬT BẰNG MẬT KHẨU ---
+    function resetGame() {
+        const password = prompt("Vui lòng nhập mật khẩu Admin để reset trò chơi:");
+        
+        if (password === null) return; // Người dùng nhấn Hủy
+
+        if (password === "559") {
+            if(confirm("Xác nhận làm mới toàn bộ? Hành động này sẽ khôi phục lại 6 số ban đầu và xóa hết lịch sử quay.")) {
+                set(gameRef, {
+                    availableNumbers: [1, 2, 3, 4, 5, 6],
+                    history: [],
+                    status: { isSpinning: false, targetAngle: 0, winner: "", player: "" }
+                });
+                document.getElementById("result").innerHTML = "🔄 Vòng quay đã được đưa về trạng thái mặc định!";
+            }
+        } else {
+            alert("Sai mật khẩu! Bạn không có quyền thiết lập lại vòng quay này.");
+        }
+    }
+
+    // Khởi tạo các sự kiện lắng nghe click chuột
+    spinBtn.addEventListener("click", spin);
+    resetBtn.addEventListener("click", resetGame);
+</script>
+
+</body>
+</html>
